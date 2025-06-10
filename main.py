@@ -1,5 +1,6 @@
 import urwid
 import os
+from magic_number_checker import check_file_and_extract_metadata
 
 ASCII_LOGO = urwid.Text((
     u"\n"
@@ -13,9 +14,9 @@ class FileExplorer(urwid.WidgetWrap):
         self.path = os.path.abspath(path)
         self.on_select = on_select
         self.body = urwid.SimpleListWalker([])
+        self.listbox = urwid.ListBox(self.body)
         self.update_list()
-        listbox = urwid.ListBox(self.body)
-        super().__init__(urwid.LineBox(listbox, title="Select File"))
+        super().__init__(urwid.LineBox(self.listbox, title="Select File"))
 
     def update_list(self):
         items = []
@@ -24,7 +25,6 @@ class FileExplorer(urwid.WidgetWrap):
         except PermissionError:
             entries = []
 
-        # Add '..' to go up a directory
         if os.path.dirname(self.path) != self.path:
             entries.insert(0, '..')
 
@@ -46,11 +46,12 @@ class FileExplorer(urwid.WidgetWrap):
 
 class MetaDiggerApp:
     def __init__(self):
-        self.footer = urwid.Text(" Press Q to Quit | Arrow keys to navigate")
+        self.footer = urwid.Text(" Press Q to Quit | Arrow keys to navigate | Enter to select")
         self.file_display = urwid.Text(" No file selected", align='center')
+        self.file_explorer = FileExplorer(on_select=self.on_file_selected)
         self.layout = urwid.Frame(
             header=ASCII_LOGO,
-            body=FileExplorer(on_select=self.on_file_selected),
+            body=self.file_explorer,
             footer=urwid.Filler(self.footer)
         )
         self.loop = urwid.MainLoop(
@@ -60,8 +61,26 @@ class MetaDiggerApp:
         )
 
     def on_file_selected(self, path):
-        self.file_display.set_text(f" Selected: {path}")
-        self.layout.body = urwid.Filler(self.file_display, valign='middle')
+        metadata = check_file_and_extract_metadata(path)
+        if metadata:
+            lines = [f"{k}: {v}" for k, v in metadata.items()]
+            text = f"Metadata for {os.path.basename(path)}\n\n" + "\n".join(lines)
+        else:
+            text = f"Could not extract metadata for {os.path.basename(path)}"
+
+        metadata_widget = urwid.Text(text, align='left')
+        back_button = urwid.Button("Back to File Picker", on_press=self.back_to_picker)
+        pile = urwid.Pile([
+            urwid.Filler(ASCII_LOGO),
+            urwid.Divider(),
+            urwid.Filler(metadata_widget, valign='top'),
+            urwid.Divider(),
+            urwid.AttrMap(back_button, None, focus_map='reversed'),
+        ])
+        self.layout.body = urwid.Filler(pile, valign='top')
+
+    def back_to_picker(self, button):
+        self.layout.body = self.file_explorer
 
     def unhandled_input(self, key):
         if key in ('q', 'Q'):
